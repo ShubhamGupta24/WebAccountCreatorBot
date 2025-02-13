@@ -5,10 +5,11 @@ import time
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from dotenv import dotenv_values
 
 def fetch_websites_from_sheet(sheet_url):
     # Google API credentials (replace with your JSON key file)
-    creds = ServiceAccountCredentials.from_json_keyfile_name("./webaccountcreationautomation-88a762a56e74.json",
+    creds = ServiceAccountCredentials.from_json_keyfile_name("../webaccountcreationautomation-88a762a56e74.json",
                                                              ["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive","https://www.googleapis.com/auth/spreadsheets"])
     client = gspread.authorize(creds)
 
@@ -56,7 +57,9 @@ def register_account(driver, url, email, password):
 
     return True
 
-def main():
+def main():   
+    secrets=dotenv_values(".env")
+    print(secrets)
     sheet_url = "https://docs.google.com/spreadsheets/d/1jmcx-APfMQ8ZM5mBffNVdL1dYkGoWKAZ/edit?usp=sharing&ouid=116536410878783318591&rtpof=true&sd=true"
     websites = fetch_websites_from_sheet(sheet_url)
 
@@ -66,7 +69,7 @@ def main():
     for site in websites:
         try:
             form_fields = extract_form_fields(driver, site)
-            success = register_account(driver, site, "sparklog.marketing@gmail.com", "Sparklog@2025")
+            success = register_account(driver, site, secrets["EMAIL"],secrets["PASSWORD"])
             data.append({"Website": site, "Form Fields": ", ".join(form_fields), "Status": "Success" if success else "Failed"})
         except Exception as e:
             data.append({"Website": site, "Form Fields": "Error", "Status": f"Failed - {str(e)}"})
