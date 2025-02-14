@@ -60,7 +60,7 @@ def register_account(driver, url, email, password):
 def main():   
     secrets=dotenv_values(".env")
     print(secrets)
-    sheet_url = "https://docs.google.com/spreadsheets/d/1jmcx-APfMQ8ZM5mBffNVdL1dYkGoWKAZ/edit?usp=sharing&ouid=116536410878783318591&rtpof=true&sd=true"
+    sheet_url = "https://docs.google.com/spreadsheets/d/1vgHkgBjOkvip0eHoJ6NrzD611bA5JJKseyYHNPcFJ7k/edit?gid=1135652541#gid=1135652541"
     websites = fetch_websites_from_sheet(sheet_url)
 
     driver = webdriver.Chrome()
