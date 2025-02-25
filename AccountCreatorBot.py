@@ -2,7 +2,6 @@ import time
 import pandas as pd
 import gspread
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
@@ -14,10 +13,11 @@ from oauth2client.service_account import ServiceAccountCredentials
 from dotenv import dotenv_values
 from datetime import datetime
 import os
+import undetected_chromedriver as uc
 
 def create_or_load_automation_data():
     """Create or load the automation tracking DataFrame"""
-    filename = 'final_automation_tracking.csv'
+    filename = 'tracking.csv'
     if os.path.exists(filename):
         return pd.read_csv(filename)
     else:
@@ -27,10 +27,11 @@ def create_or_load_automation_data():
             'website',
             'status',  # 1 for success, 0 for failure
             'error_message',
-            'form_fields'
+            'form_fields',
+            'steps_reached'
         ])
 
-def update_automation_status(df, user_login, website, status, form_fields="", error_message=""):
+def update_automation_status(df, user_login, website, status, form_fields="", error_message="", steps_reached=""):
     """Update the DataFrame with new automation attempt"""
     new_row = {
         'timestamp': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
@@ -38,17 +39,18 @@ def update_automation_status(df, user_login, website, status, form_fields="", er
         'website': website,
         'status': status,
         'error_message': error_message,
-        'form_fields': form_fields
+        'form_fields': form_fields,
+        'steps_reached': steps_reached
     }
     df.loc[len(df)] = new_row
-    df.to_csv('final_automation_tracking.csv', index=False)
+    df.to_csv('tracking.csv', index=False)
     return df
 
 def fetch_websites_from_sheet(sheet_id):
     try:
         # Google API credentials
         creds = ServiceAccountCredentials.from_json_keyfile_name(
-            "./webaccountcreationautomation-88a762a56e74.json",
+            "../webaccountcreationautomation-88a762a56e74.json",
             ["https://www.googleapis.com/auth/spreadsheets",
              "https://www.googleapis.com/auth/drive",
              "https://www.googleapis.com/auth/spreadsheets"]
@@ -67,11 +69,12 @@ def fetch_websites_from_sheet(sheet_id):
         return []
 
 def register_google(driver, google_email, google_password):
+    steps_reached = ""  # Initialize steps_reached
     try:
         print("🔵 Step 1: Clicking 'Sign In' button...")
 
         # Updated to check for multiple possible texts
-        signin_texts = ['Sign in', 'Sign up', 'Login', 'Register']
+        signin_texts = ['Sign up', 'Register', 'Create Account', 'Sign in', 'Login']
         signin_button = None
         for text in signin_texts:
             try:
@@ -95,9 +98,11 @@ def register_google(driver, google_email, google_password):
                     continue
 
         if not signin_button:
+            steps_reached = "Sign in/Sign up/Login/Register button not found"
             raise TimeoutException("🔴 Sign in/Sign up/Login/Register button not found.")
 
         signin_button.click()
+        steps_reached = "Sign in/Sign up/Login/Register button clicked"
         time.sleep(2)
 
         print("🔵 Step 2: Clicking 'Continue with Google'...")
@@ -120,9 +125,11 @@ def register_google(driver, google_email, google_password):
                 continue
         
         if not google_button:
+            steps_reached = "'Continue with Google' button not found"
             raise TimeoutException("🔴 'Continue with Google' button not found.")
 
         google_button.click()
+        steps_reached = "Continue with Google button clicked"
         time.sleep(3)
 
         print("🔵 Step 4: Entering Google email...")
@@ -131,6 +138,7 @@ def register_google(driver, google_email, google_password):
         )
         email_field.send_keys(google_email)
         email_field.send_keys(Keys.RETURN)
+        steps_reached = "Entering Google email"
         time.sleep(3)
 
         print("🔵 Step 5: Entering Google password...")
@@ -139,6 +147,7 @@ def register_google(driver, google_email, google_password):
         )
         password_field.send_keys(google_password)
         password_field.send_keys(Keys.RETURN)
+        steps_reached = "Entering Google password"
         time.sleep(5)
 
         # Handle CAPTCHA (Manual Input if needed)
@@ -148,6 +157,7 @@ def register_google(driver, google_email, google_password):
                 EC.presence_of_element_located((By.XPATH, "//iframe[contains(@title, 'recaptcha')]"))
             )
             if captcha_detected:
+                steps_reached = "CAPTCHA detected"
                 input("🚨 CAPTCHA detected! Solve it manually and press Enter to continue...")
         except TimeoutException:
             print("✅ No CAPTCHA detected. Proceeding...")
@@ -155,48 +165,60 @@ def register_google(driver, google_email, google_password):
         # Switch back to initial window
         print("🔵 Step 6: Returning to initial window...")
         driver.switch_to.window(initial_window)
+        steps_reached = "Success"
         time.sleep(5)
 
         print("🎉 SUCCESS: Logged into website using Google!")
-        return True
+        return steps_reached
 
     except Exception as e:
         print(f"❌ ERROR: Google Signup/Login failed: {str(e)}")
         print("Stacktrace:", traceback.format_exc())
-        return False
+        return steps_reached
 
-def register_website(driver, website, email, password, user_login, final_automation_tracking_df):
-    """Handle registration for a specific website"""
+def register_website(driver, website, email, password, user_login, tracking_df):
+    steps_reached = ""  # Initialize steps_reached
     try:
         print(f"🔵 Attempting to register on: {website}")
         driver.get(website)
         time.sleep(3)
 
         # Attempt Google registration
-        success = register_google(driver, email, password)
+        steps_reached = register_google(driver, email, password)
         
-        if success:
+        if steps_reached == "Success":
             print(f"✅ Successfully registered on {website}")
             form_fields = extract_form_fields(driver, website)
             update_automation_status(
-                final_automation_tracking_df,
+                tracking_df,
                 user_login,
                 website,
                 1,
+                steps_reached=steps_reached,
                 form_fields=", ".join(form_fields)
             )
             return True
-        
-        return False
+        else:
+            # If Google registration fails, log the failure
+            update_automation_status(
+                tracking_df,
+                user_login,
+                website,
+                0,
+                steps_reached=steps_reached,
+                error_message="Google registration failed"
+            )
+            return False
 
     except Exception as e:
         error_msg = str(e)
         print(f"❌ ERROR: Failed to register on {website}: {error_msg}")
         update_automation_status(
-            final_automation_tracking_df,
+            tracking_df,
             user_login,
             website,
             0,
+            steps_reached=steps_reached,
             error_message=error_msg
         )
         return False
@@ -212,8 +234,8 @@ def extract_form_fields(driver, website):
         return []
 
 def main():
-    current_user = "Sparklog"  # You can make this dynamic
-    final_automation_tracking_df = create_or_load_automation_data()
+    current_user = "ShubhamGupta24"  # You can make this dynamic
+    tracking_df = create_or_load_automation_data()
     
     secrets = dotenv_values(".env")
     print("Secrets:", secrets)
@@ -225,20 +247,33 @@ def main():
         print("❌ No websites found in the sheet.")
         return
 
-    options = webdriver.ChromeOptions()
+    options = uc.ChromeOptions()
     options.add_argument("--start-maximized")
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("--disable-infobars")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option("useAutomationExtension", False)
-    
-    prefs = {"profile.default_content_setting_values.notifications": 2}
+    options.add_argument("--disable-popup-blocking")  # Disable popups
+    options.add_argument("--disable-notifications")  # Disable notifications
+    options.add_argument("--disable-extensions")  # Disable extensions
+    options.add_argument("--no-sandbox")  # Bypass OS security model
+    options.add_argument("--disable-dev-shm-usage")  # Overcome limited resource problems
+    options.add_argument("--incognito")  # Incognito mode for fresh session
+    options.headless = False  # Set to False to see the browser
+
+    # Disable third-party cookies
+    prefs = {
+        "profile.default_content_setting_values.notifications": 2,
+        "profile.default_content_setting_values.popups": 2,
+        "profile.default_content_setting_values.ads": 2,
+        "profile.default_content_setting_values.cookies": 2  # Disable third-party cookies
+    }
     options.add_experimental_option("prefs", prefs)
 
     try:
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        driver = uc.Chrome(options=options)
         
         for website in websites:
+            if website[:5] != "https":
+                website = "https://" + website
             try:
                 success = register_website(
                     driver,
@@ -246,12 +281,12 @@ def main():
                     secrets["EMAIL"],
                     secrets["PASSWORD"],
                     current_user,
-                    final_automation_tracking_df
+                    tracking_df
                 )
                 
                 # Display current status
                 print("\nAutomation Tracking Status:")
-                print(final_automation_tracking_df.tail())
+                print(tracking_df.tail())
                 
             except Exception as e:
                 print(f"❌ ERROR processing {website}: {str(e)}")
@@ -262,15 +297,16 @@ def main():
         print("Stacktrace:", traceback.format_exc())
 
     finally:
-        driver.quit()
+        if 'driver' in locals():
+            driver.quit()
         
         # Save final results
         print("\nFinal Results:")
-        print(final_automation_tracking_df.groupby('status').size())
+        print(tracking_df.groupby('status').size())
         
         # Export to CSV
-        final_automation_tracking_df.to_csv('final_automation_results.csv', index=False)
-        print("\nProcess completed. Results saved to final_automation_results.csv")
+        tracking_df.to_csv('results.csv', index=False)
+        print("\nProcess completed. Results saved to results.csv")
 
 if __name__ == "__main__":
     main()
