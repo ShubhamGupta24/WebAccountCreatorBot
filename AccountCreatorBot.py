@@ -94,7 +94,7 @@ def search_for_register_text(driver):
         try:
             elements = driver.find_elements(By.XPATH, "//*")
             for element in elements:
-                if fuzz.partial_ratio(text.lower(), element.text.lower()) > 75:
+                if fuzz.ratio(text.lower(), element.text.lower()) > 75:
                     print(f"🔑 Found register text: {text}")
                     return element
         except TimeoutException:
@@ -107,7 +107,7 @@ def search_for_login_text(driver):
         try:
             elements = driver.find_elements(By.XPATH, "//*")
             for element in elements:
-                if fuzz.partial_ratio(text.lower(), element.text.lower()) > 75:
+                if fuzz.ratio(text.lower(), element.text.lower()) > 75:
                     print(f"🔑 Found login text: {element.text}")
                     return element
         except TimeoutException:
@@ -141,7 +141,7 @@ def search_for_google_buttons(driver):
         try:
             elements = driver.find_elements(By.XPATH, "//*")
             for element in elements:
-                if fuzz.partial_ratio(locator.lower(), element.text.lower()) > 75:
+                if fuzz.ratio(locator.lower(), element.text.lower()) > 75:
                     print("🔑 Found Google button : ",element.text)
                     return element
         except TimeoutException:
