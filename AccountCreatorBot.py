@@ -14,15 +14,12 @@ from dotenv import dotenv_values
 from datetime import datetime
 import os
 import undetected_chromedriver as uc
-import sys
 from fuzzywuzzy import fuzz
 
-# Temporarily increase the recursion limit
-sys.setrecursionlimit(1500)
 
 def create_or_load_automation_data():
     """Create or load the automation tracking DataFrame"""
-    filename = 'automation_tracker.csv'
+    filename = 'automation_tracker_new.csv'
     if os.path.exists(filename):
         return pd.read_csv(filename)
     else:
@@ -50,7 +47,7 @@ def update_automation_status(df, user_login, website, status, form_fields="", er
         'keyword_found': keyword_found
     }
     df.loc[len(df)] = new_row
-    df.to_csv('automation_tracker.csv', index=False)
+    df.to_csv('automation_tracker_new.csv', index=False)
     return df
 
 def fetch_websites_from_sheet(sheet_id):
@@ -89,7 +86,7 @@ def crawl_for_specific_keywords(driver):
     return ""
 
 def search_for_register_text(driver):
-    register_texts = ['Register', 'Sign up', 'Create Account']
+    register_texts = [ 'Sign up','Register', 'Create Account','Join']
     for text in register_texts:
         try:
             elements = driver.find_elements(By.XPATH, "//*")
@@ -116,26 +113,14 @@ def search_for_login_text(driver):
 
 def search_for_google_buttons(driver):
     google_button_locators = [
-        "//div[contains(text(), 'Register with Google')]",
-        "//a[contains(text(), 'Register with Google')]",
-        "//span[contains(text(), 'Register with Google')]",
-        "//button[contains(text(), 'Register with Google')]",
-        "//button[contains(text(), 'Continue with Google')]",
-        "//span[contains(text(), 'Continue with Google')]",
-        "//div[contains(text(), 'Continue with Google')]",
-        "//a[contains(text(), 'Continue with Google')]",
-        "//div[contains(text(), 'Sign In with Google')]",
-        "//a[contains(text(), 'Sign In with Google')]",
-        "//span[contains(text(), 'Sign In with Google')]",
-        "//button[contains(text(), 'Sign In with Google')]",
-        "//div[contains(text(), 'Sign Up with Google')]",
-        "//a[contains(text(), 'Sign Up with Google')]",
-        "//span[contains(text(), 'Sign Up with Google')]",
-        "//button[contains(text(), 'Sign Up with Google')]",
-        "//div[contains(text(), 'Join with Google')]",
-        "//a[contains(text(), 'Join with Google')]",
-        "//span[contains(text(), 'Join with Google')]",
-        "//button[contains(text(), 'Join with Google')]",
+        'Register with Google',
+        'Continue with Google',
+        'Sign In with Google',
+        'Sign Up with Google',
+        'Join with Google',
+        'Google Sign Up',
+        'Google Sign In',
+        'Google'
     ]
     for locator in google_button_locators:
         try:
@@ -321,7 +306,7 @@ def register_with_google(driver, google_email, google_password, steps_reached):
         steps_reached += " -> Failed at Registration"
         return steps_reached, keyword_found
 
-def register_website(driver, website, email, password, username, user_login, automation_tracker_df):
+def register_website(driver, website, email, password, username, user_login, automation_tracker_new_df):
     steps_reached = "Start"  # Initialize steps_reached
     keyword_found = ""  # Initialize keyword_found
     try:
@@ -338,7 +323,7 @@ def register_website(driver, website, email, password, username, user_login, aut
             print(f"✅ Successfully registered on {website}")
             form_fields = extract_form_fields(driver, website)
             update_automation_status(
-                automation_tracker_df,
+                automation_tracker_new_df,
                 user_login,
                 website,
                 1,
@@ -354,7 +339,7 @@ def register_website(driver, website, email, password, username, user_login, aut
                 print(f"✅ Successfully registered on {website}")
                 form_fields = extract_form_fields(driver, website)
                 update_automation_status(
-                    automation_tracker_df,
+                    automation_tracker_new_df,
                     user_login,
                     website,
                     1,
@@ -366,7 +351,7 @@ def register_website(driver, website, email, password, username, user_login, aut
             else:
                 # If both methods fail, log the failure
                 update_automation_status(
-                    automation_tracker_df,
+                    automation_tracker_new_df,
                     user_login,
                     website,
                     0,
@@ -380,7 +365,7 @@ def register_website(driver, website, email, password, username, user_login, aut
         error_msg = str(e)
         print(f"❌ ERROR: Failed to register on {website}: {error_msg}")
         update_automation_status(
-            automation_tracker_df,
+            automation_tracker_new_df,
             user_login,
             website,
             0,
@@ -402,7 +387,7 @@ def extract_form_fields(driver, website):
 
 def main():
     current_user = "ShubhamGupta24"
-    automation_tracker_df = create_or_load_automation_data()
+    automation_tracker_new_df = create_or_load_automation_data()
     
     secrets = dotenv_values(".env")
     print("Secrets:", secrets)
@@ -452,11 +437,11 @@ def main():
                     password,
                     username,
                     current_user,
-                    automation_tracker_df
+                    automation_tracker_new_df
                 )
                 
                 print("\nAutomation Tracker Status:")
-                print(automation_tracker_df.tail())
+                print(automation_tracker_new_df.tail())
                 
             except Exception as e:
                 print(f"❌ ERROR processing {website}: {str(e)}")
@@ -472,9 +457,9 @@ def main():
         
         
         print("\nFinal Results:")
-        print(automation_tracker_df.groupby('status').size())
+        print(automation_tracker_new_df.groupby('status').size())
         
-        automation_tracker_df.to_csv('results.csv', index=False)
+        automation_tracker_new_df.to_csv('results.csv', index=False)
         print("\nProcess completed. Results saved to results.csv")
 
 if __name__ == "__main__":
