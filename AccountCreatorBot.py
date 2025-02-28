@@ -6,20 +6,24 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException, StaleElementReferenceException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
+from urllib.parse import urlparse, urlunparse
 import traceback
 from oauth2client.service_account import ServiceAccountCredentials
 from dotenv import dotenv_values
 from datetime import datetime
 import os
 import undetected_chromedriver as uc
+import sys
 from fuzzywuzzy import fuzz
 
+# Temporarily increase the recursion limit
+sys.setrecursionlimit(1500)
 
 def create_or_load_automation_data():
     """Create or load the automation tracking DataFrame"""
-    filename = 'automation_tracker_new.csv'
+    filename = 'automation_tracker.csv'
     if os.path.exists(filename):
         return pd.read_csv(filename)
     else:
@@ -37,7 +41,7 @@ def create_or_load_automation_data():
 def update_automation_status(df, user_login, website, status, form_fields="", error_message="", steps_reached="", keyword_found=""):
     """Update the DataFrame with new automation attempt"""
     new_row = {
-        'timestamp': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+        'timestamp': datetime.utcnow().strftime('%Y-%M-%d %H:%M:%S'),
         'user_login': user_login,
         'website': website,
         'status': status,
@@ -47,7 +51,7 @@ def update_automation_status(df, user_login, website, status, form_fields="", er
         'keyword_found': keyword_found
     }
     df.loc[len(df)] = new_row
-    df.to_csv('automation_tracker_new.csv', index=False)
+    df.to_csv('automation_tracker.csv', index=False)
     return df
 
 def fetch_websites_from_sheet(sheet_id):
@@ -72,7 +76,16 @@ def fetch_websites_from_sheet(sheet_id):
         print(f"❌ ERROR: Failed to fetch websites from sheet: {str(e)}")
         return []
 
-def crawl_for_specific_keywords(driver):
+def save_screenshot(driver, website, action_desc):
+    website_name = website.split("//")[-1].split("/")[0]
+    folder_path = os.path.join("screenshots", website_name)
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+    screenshot_path = os.path.join(folder_path, f"{action_desc}.png")
+    driver.save_screenshot(screenshot_path)
+    print(f"💾 Screenshot saved: {screenshot_path}")
+
+def crawl_for_specific_keywords(driver, website):
     keywords = ["Submit", "Submit your startup", "List my startup"]
     for keyword in keywords:
         try:
@@ -80,60 +93,118 @@ def crawl_for_specific_keywords(driver):
                 EC.presence_of_element_located((By.XPATH, f"//*[contains(text(), '{keyword}')]"))
             )
             print(f"🔑 Found keyword: {keyword}")
+            save_screenshot(driver, website, f"keyword {keyword} found")
             return keyword
         except TimeoutException:
             continue
     return ""
 
-def search_for_register_text(driver):
-    register_texts = [ 'Sign up','Register', 'Create Account','Join']
+def search_for_register_text(driver, website):
+    register_texts = ['Register','Get Listed','Join', 'Sign up', 'Create Account']
     for text in register_texts:
         try:
-            elements = driver.find_elements(By.XPATH, "//*")
+            elements = driver.find_elements(By.XPATH, f"//*[contains(., '{text}')]")
             for element in elements:
-                if fuzz.ratio(text.lower(), element.text.lower()) > 75:
-                    print(f"🔑 Found register text: {text}")
+                if fuzz.ratio(text.lower(), element.text.lower()) > 90:
+                    print(f"🔑 Found register text: {element.text}")
+                    print("🔑 Found register button match with : ", text)
+                    save_screenshot(driver, website, f"register text {text} found")
                     return element
         except TimeoutException:
             continue
     return None
 
-def search_for_login_text(driver):
+def search_for_login_text(driver, website):
     login_texts = ['Login', 'Sign in']
     for text in login_texts:
         try:
-            elements = driver.find_elements(By.XPATH, "//*")
+            elements = driver.find_elements(By.XPATH, f"//*[contains(., '{text}')]")
             for element in elements:
-                if fuzz.ratio(text.lower(), element.text.lower()) > 75:
+                if fuzz.ratio(text.lower(), element.text.lower()) > 90:
                     print(f"🔑 Found login text: {element.text}")
+                    print("🔑 Found login button match with : ", text)
+                    save_screenshot(driver, website, f"login text {text} found")
                     return element
         except TimeoutException:
             continue
     return None
 
-def search_for_google_buttons(driver):
+def search_for_google_buttons(driver, website):
     google_button_locators = [
-        'Register with Google',
-        'Continue with Google',
-        'Sign In with Google',
-        'Sign Up with Google',
-        'Join with Google',
-        'Google Sign Up',
-        'Google Sign In',
-        'Google'
+        "Register with Google",
+        "Continue with Google",
+        "Sign In with Google",
+        "Sign Up with Google",
+        "Join with Google",
     ]
+
+    # XPath to capture buttons with text & nested Google icons (SVG, IMG, or Google classes)
+    xpath_query = """
+    //*[self::button or self::a or self::div or self::span]
+    [contains(translate(normalize-space(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{}')]
+    [descendant::*[self::svg or self::img or contains(@class, 'icon') or contains(@class, 'google')]]
+    """
+
+    def find_shadow_root_elements():
+        # Try to access shadow roots (for modern web components)
+        shadow_roots = []
+        shadow_hosts = driver.find_elements(By.CSS_SELECTOR, '*[shadowroot]')
+        for host in shadow_hosts:
+            try:
+                shadow_root = driver.execute_script('return arguments[0].shadowRoot', host)
+                shadow_roots.extend(shadow_root.find_elements(By.XPATH, './/*'))
+            except Exception as e:
+                print("❌ Error accessing shadow root: ", e)
+        return shadow_roots
+
     for locator in google_button_locators:
         try:
-            elements = driver.find_elements(By.XPATH, "//*")
+            # Standard element search
+            elements = driver.find_elements(By.XPATH, xpath_query.format(locator.lower()))
+            
+            # Shadow DOM search
+            shadow_elements = find_shadow_root_elements()
+            elements.extend(shadow_elements)
+
             for element in elements:
-                if fuzz.ratio(locator.lower(), element.text.lower()) > 75:
-                    print("🔑 Found Google button : ",element.text)
-                    return element
+                try:
+                    # Clean button text for fuzzy matching
+                    button_text = element.text.strip().lower()
+
+                    if fuzz.ratio(locator.lower(), button_text) > 70:
+                        print("🔑 Found Google button: ", button_text)
+                        print("🔑 Matched with: ", locator)
+
+                        # Scroll into view
+                        driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", element)
+
+                        # Wait for visibility & clickability
+                        WebDriverWait(driver, 10).until(EC.visibility_of(element))
+                        WebDriverWait(driver, 10).until(EC.element_to_be_clickable(element))
+
+                        # Ensure animations (like fade-in) are completed
+                        time.sleep(0.5)
+
+                        save_screenshot(driver, website, f"Google button {button_text} found")
+                        return element
+
+                except StaleElementReferenceException:
+                    print("⚠️ Element went stale — retrying...")
+                    continue
+                except Exception as e:
+                    print("❌ Error interacting with element: ", e)
+                    continue
         except TimeoutException:
+            print(f"⏳ Timeout waiting for '{locator}'")
             continue
+        except NoSuchElementException:
+            print(f"❌ No element found for '{locator}'")
+            continue
+
+    print("❌ No Google buttons found.")
     return None
 
-def proceed_with_google_auth(driver, google_email, google_password, steps_reached):
+def proceed_with_google_auth(driver, google_email, google_password, steps_reached, website):
     steps_reached += " -> Proceed with Google Auth"
     try:
         print("🔵 Step: Entering Google email...")
@@ -145,6 +216,7 @@ def proceed_with_google_auth(driver, google_email, google_password, steps_reache
         email_field.send_keys(Keys.RETURN)
         steps_reached += " -> Entered Google email"
         time.sleep(3)
+        save_screenshot(driver, website, "entered google email")
 
         print("🔵 Step: Entering Google password...")
         password_field = WebDriverWait(driver, 30).until(
@@ -155,6 +227,7 @@ def proceed_with_google_auth(driver, google_email, google_password, steps_reache
         password_field.send_keys(Keys.RETURN)
         steps_reached += " -> Entered Google password"
         time.sleep(5)
+        save_screenshot(driver, website, "entered google password")
 
         # Handle CAPTCHA (Manual Input if needed)
         try:
@@ -164,6 +237,7 @@ def proceed_with_google_auth(driver, google_email, google_password, steps_reache
             )
             if captcha_detected:
                 steps_reached += " -> CAPTCHA detected"
+                save_screenshot(driver, website, "captcha detected")
                 input("🚨 CAPTCHA detected! Solve it manually and press Enter to continue...")
         except TimeoutException:
             print("✅ No CAPTCHA detected. Proceeding...")
@@ -173,6 +247,7 @@ def proceed_with_google_auth(driver, google_email, google_password, steps_reache
         driver.switch_to.window(driver.window_handles[0])
         steps_reached += " -> Success"
         time.sleep(5)
+        save_screenshot(driver, website, "returned to initial window")
 
         print("🎉 SUCCESS: Logged into website using Google!")
         return steps_reached
@@ -182,7 +257,7 @@ def proceed_with_google_auth(driver, google_email, google_password, steps_reache
         steps_reached += " -> Failed at Google Auth"
         return steps_reached
 
-def enter_email_password(driver, email, password, username, steps_reached):
+def enter_email_password(driver, email, password, username, steps_reached, website):
     steps_reached += " -> Start Email/Password Entry"
     current_url = driver.current_url
     print(f"Current URL: {current_url}")
@@ -225,6 +300,7 @@ def enter_email_password(driver, email, password, username, steps_reached):
         password_field.send_keys(Keys.RETURN)
         steps_reached += " -> Submitted form"
         time.sleep(5)
+        save_screenshot(driver, website, "submitted form")
 
         # Handle CAPTCHA (Manual Input if needed)
         try:
@@ -234,6 +310,7 @@ def enter_email_password(driver, email, password, username, steps_reached):
             )
             if captcha_detected:
                 steps_reached += " -> CAPTCHA detected"
+                save_screenshot(driver, website, "captcha detected")
                 input("🚨 CAPTCHA detected! Solve it manually and press Enter to continue...")
         except TimeoutException:
             print("✅ No CAPTCHA detected. Proceeding...")
@@ -247,7 +324,7 @@ def enter_email_password(driver, email, password, username, steps_reached):
         steps_reached += " -> Failed at Email/Password Entry"
         return steps_reached, str(e)
 
-def register_with_google(driver, google_email, google_password, steps_reached):
+def register_with_google(driver, google_email, google_password, steps_reached, website):
     current_url = driver.current_url
     print(f"Current URL: {current_url}")
     steps_reached += " -> Start Registration"
@@ -256,44 +333,52 @@ def register_with_google(driver, google_email, google_password, steps_reached):
         print("🔵 Step: Crawl for Register related texts...")
 
         # Look for Register related texts
-        register_button = search_for_register_text(driver)
+        register_button = search_for_register_text(driver, website)
 
         if register_button:
             register_button.click()
             steps_reached += " -> Click Register"
             time.sleep(2)
+            driver.refresh()
             current_url = driver.current_url
             print(f"Current URL: {current_url}")
+            save_screenshot(driver, website, "clicked register button")
         else:
             print("🔵 Step: Crawl for Login related texts...")
-            login_button = search_for_login_text(driver)
+            login_button = search_for_login_text(driver, website)
 
             if login_button:
                 login_button.click()
                 steps_reached += " -> Click Login"
                 time.sleep(2)
+                driver.refresh()
                 current_url = driver.current_url
                 print(f"Current URL: {current_url}")
+                save_screenshot(driver, website, "clicked login button")
 
                 print("🔵 Step: Search for Register related texts again...")
-                register_button = search_for_register_text(driver)
+                register_button = search_for_register_text(driver, website)
                 if register_button:
                     register_button.click()
                     steps_reached += " -> Found register-related text after clicking login"
                     time.sleep(2)
+                    driver.refresh()
                     current_url = driver.current_url
                     print(f"Current URL: {current_url}")
+                    save_screenshot(driver, website, "clicked register button after login")
 
         print("🔵 Step: Search for Google buttons...")
-        google_button = search_for_google_buttons(driver)
+        google_button = search_for_google_buttons(driver, website)
         
         if google_button:
             google_button.click()
             steps_reached += " -> Proceed with Google Auth"
             time.sleep(3)
+            driver.refresh()
             current_url = driver.current_url
             print(f"Current URL: {current_url}")
-            steps_reached = proceed_with_google_auth(driver, google_email, google_password, steps_reached)
+            save_screenshot(driver, website, "clicked google button")
+            steps_reached = proceed_with_google_auth(driver, google_email, google_password, steps_reached, website)
             return steps_reached, keyword_found
         else:
             # If Google button is not found, proceed with registration using email & password
@@ -306,24 +391,25 @@ def register_with_google(driver, google_email, google_password, steps_reached):
         steps_reached += " -> Failed at Registration"
         return steps_reached, keyword_found
 
-def register_website(driver, website, email, password, username, user_login, automation_tracker_new_df):
+def register_website(driver, website, email, password, username, user_login, automation_tracker_df):
     steps_reached = "Start"  # Initialize steps_reached
     keyword_found = ""  # Initialize keyword_found
     try:
         print(f"🔵 Attempting to register on: {website}")
         driver.get(website)
         time.sleep(3)
+        save_screenshot(driver, website, "loaded website")
 
         # Crawl for specific keywords
-        keyword_found = crawl_for_specific_keywords(driver)
+        keyword_found = crawl_for_specific_keywords(driver, website)
 
         # Attempt to register using Google authentication
-        steps_reached, _ = register_with_google(driver, email, password, steps_reached)
+        steps_reached, _ = register_with_google(driver, email, password, steps_reached, website)
         if "Success" in steps_reached:
             print(f"✅ Successfully registered on {website}")
             form_fields = extract_form_fields(driver, website)
             update_automation_status(
-                automation_tracker_new_df,
+                automation_tracker_df,
                 user_login,
                 website,
                 1,
@@ -334,12 +420,12 @@ def register_website(driver, website, email, password, username, user_login, aut
             return True
         else:
             # If Google registration fails, try email/password registration
-            steps_reached, error_message = enter_email_password(driver, email, password, username, steps_reached)
+            steps_reached, error_message = enter_email_password(driver, email, password, username, steps_reached, website)
             if "Success" in steps_reached:
                 print(f"✅ Successfully registered on {website}")
                 form_fields = extract_form_fields(driver, website)
                 update_automation_status(
-                    automation_tracker_new_df,
+                    automation_tracker_df,
                     user_login,
                     website,
                     1,
@@ -351,7 +437,7 @@ def register_website(driver, website, email, password, username, user_login, aut
             else:
                 # If both methods fail, log the failure
                 update_automation_status(
-                    automation_tracker_new_df,
+                    automation_tracker_df,
                     user_login,
                     website,
                     0,
@@ -365,7 +451,7 @@ def register_website(driver, website, email, password, username, user_login, aut
         error_msg = str(e)
         print(f"❌ ERROR: Failed to register on {website}: {error_msg}")
         update_automation_status(
-            automation_tracker_new_df,
+            automation_tracker_df,
             user_login,
             website,
             0,
@@ -385,22 +471,32 @@ def extract_form_fields(driver, website):
         print(f"❌ ERROR: Failed to extract form fields from {website}: {str(e)}")
         return []
 
+
+def process_link(url):
+    parsed_url = urlparse(url)
+    if parsed_url.scheme == "http":
+        return urlunparse(parsed_url._replace(scheme="https"))
+    elif not parsed_url.scheme:
+        return "https://" + url
+    return url
+
 def main():
     current_user = "ShubhamGupta24"
-    automation_tracker_new_df = create_or_load_automation_data()
+    automation_tracker_df = create_or_load_automation_data()
     
     secrets = dotenv_values(".env")
     print("Secrets:", secrets)
     email = secrets["EMAIL"]
     password = secrets["PASSWORD"]
     username = secrets["USERNAME"]
-    # sheet_id = secrets["SHEET_ID"]
-    df = pd.read_csv('register_file.csv')
+    sheet_id = secrets["SHEET_ID"]
+    df = pd.read_csv('filtered_file.csv')
+    
 
-    websites = df['website']
+    websites = fetch_websites_from_sheet(sheet_id)
     print("Websites:", websites)
 
-    if websites.empty:
+    if websites==[]:
         print("❌ No websites found in the sheet.")
         return
 
@@ -413,6 +509,10 @@ def main():
     options.add_argument("--disable-extensions")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument('--ignore-certificate-errors')
+    options.add_argument('--ignore-ssl-errors')
+    options.add_argument("--incognito")
+    
     options.headless = False
 
     prefs = {
@@ -427,8 +527,7 @@ def main():
         driver = uc.Chrome(options=options)
         
         for website in websites:
-            if not website.startswith("https"):
-                website = "https://" + website
+            website = process_link(website)
             try:
                 success = register_website(
                     driver,
@@ -437,11 +536,11 @@ def main():
                     password,
                     username,
                     current_user,
-                    automation_tracker_new_df
+                    automation_tracker_df
                 )
                 
                 print("\nAutomation Tracker Status:")
-                print(automation_tracker_new_df.tail())
+                print(automation_tracker_df.tail())
                 
             except Exception as e:
                 print(f"❌ ERROR processing {website}: {str(e)}")
@@ -457,9 +556,9 @@ def main():
         
         
         print("\nFinal Results:")
-        print(automation_tracker_new_df.groupby('status').size())
+        print(automation_tracker_df.groupby('status').size())
         
-        automation_tracker_new_df.to_csv('results.csv', index=False)
+        automation_tracker_df.to_csv('auto_results.csv', index=False)
         print("\nProcess completed. Results saved to results.csv")
 
 if __name__ == "__main__":
