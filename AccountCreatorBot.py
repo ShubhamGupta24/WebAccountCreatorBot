@@ -26,7 +26,7 @@ sys.setrecursionlimit(1500)
 
 def create_or_load_automation_data():
     """Create or load the automation tracking DataFrame"""
-    filename = 'latest_automation_tracker.csv'
+    filename = 'new_latest_automation_tracker.csv'
     if os.path.exists(filename):
         return pd.read_csv(filename)
     else:
@@ -44,7 +44,7 @@ def create_or_load_automation_data():
 def update_automation_status(df, user_login, website, status, form_fields="", error_message="", steps_reached="", keyword_found=""):
     """Update the DataFrame with new automation attempt"""
     new_row = {
-        'timestamp': datetime.utcnow().strftime('%Y-%M-%d %H:%M:%S'),
+        'timestamp': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
         'user_login': user_login,
         'website': website,
         'status': status,
@@ -54,7 +54,7 @@ def update_automation_status(df, user_login, website, status, form_fields="", er
         'keyword_found': keyword_found
     }
     df.loc[len(df)] = new_row
-    df.to_csv('latest_automation_tracker.csv', index=False)
+    df.to_csv('new_latest_automation_tracker.csv', index=False)
     return df
 
 def fetch_websites_from_sheet(sheet_id):
@@ -81,7 +81,7 @@ def fetch_websites_from_sheet(sheet_id):
 
 def save_screenshot(driver, website, action_desc):
     website_name = website.split("//")[-1].split("/")[0]
-    folder_path = os.path.join("latest_screenshots", website_name)
+    folder_path = os.path.join("new_latest_screenshots", website_name)
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
     screenshot_path = os.path.join(folder_path, f"{action_desc}.png")
@@ -102,25 +102,21 @@ def crawl_for_specific_keywords(driver, website):
             continue
     return ""
 
-
-
 def search_for_register_text(driver, website):
     model = SentenceTransformer('all-MiniLM-L6-v2')
-    register_texts = ['Register', 'Get Listed', 'Join', 'Sign up', 'Create Account', 'List your startup', 'Submit your startup', 'List my startup']
+    register_texts = ['Register', 'Get Listed', 'Join', 'Sign up', 'Create Account', 'List your startup', 'Submit your startup']
     register_embeddings = model.encode(register_texts, convert_to_tensor=True)
-    # actions = ActionChains(driver)
     
     try:
-        elements = driver.find_elements(By.XPATH, '//*[self::button or self::a or self::div or self::span or self::img or self::svg][text() or descendant::*[self::svg or self::img or contains(@class, "register")]]')
+        elements = driver.find_elements(By.XPATH, '//*[self::button or self::a or self::div or self::span or self::img or self::svg][text() or descendant::*[self::svg or self::img or contains(@class, "signup")]]')
         for element in elements:
-            # actions.move_to_element(element).perform()  # Hover to reveal hidden text
-            element_text = element.text.strip() if element.text.strip() else element.get_attribute('title') or "Register Icon/Button"
+            element_text = element.text.strip()
             
             element_embedding = model.encode([element_text], convert_to_tensor=True)
             similarities = util.pytorch_cos_sim(element_embedding, register_embeddings)
             max_similarity = similarities.max().item()
             
-            if max_similarity > 0.8:  # Adjust threshold as needed
+            if max_similarity > 0.85:  # Adjust threshold as needed
                 print(f"🔑 Found register text: {element_text}")
                 print("🔑 Matched with register phrase: ", register_texts[similarities.argmax().item()])
                 save_screenshot(driver, website, f"register text {element_text} found")
@@ -130,38 +126,48 @@ def search_for_register_text(driver, website):
     
     print("❌ No register buttons found.")
     return None
+
 def search_for_login_text(driver, website):
     login_texts = ['Login', 'Sign in','Log in']
-    for text in login_texts:
-        try:
-            elements = driver.find_elements(By.XPATH, f"//*[contains(., '{text}')]")
-            for element in elements:
-                if fuzz.ratio(text.lower(), element.text.lower()) > 90:
-                    print(f"🔑 Found login text: {element.text}")
-                    print("🔑 Found login button match with : ", text)
-                    save_screenshot(driver, website, f"login text {text} found")
-                    return element
-        except TimeoutException:
-            continue
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    login_embeddings = model.encode(login_texts, convert_to_tensor=True)
+
+    try:
+        elements = driver.find_elements(By.XPATH, '//*[self::button or self::a or self::div or self::span or self::img or self::svg][text() or descendant::*[self::svg or self::img or contains(@class, "login")]]')
+        for element in elements:
+            element_text = element.text.strip()
+            
+            element_embedding = model.encode([element_text], convert_to_tensor=True)
+            similarities = util.pytorch_cos_sim(element_embedding, login_embeddings)
+            max_similarity = similarities.max().item()
+            
+            if max_similarity > 0.85:  # Adjust threshold as needed
+                print(f"🔑 Found login text: {element_text}")
+                print("🔑 Matched with login phrase: ", login_texts[similarities.argmax().item()])
+                save_screenshot(driver, website, f"login text {element_text} found")
+                return element
+    except TimeoutException:
+        pass
+    
+
+    print("❌ No login buttons found.")
     return None
 
 def search_for_google_buttons(driver, website):
     model = SentenceTransformer('all-MiniLM-L6-v2')
     google_button_texts = ['Register with Google', 'Continue with Google', 'Sign In with Google', 'Sign Up with Google', 'Join with Google', 'Google']
     google_embeddings = model.encode(google_button_texts, convert_to_tensor=True)
-    # actions = ActionChains(driver)
     
     try:
-        elements = driver.find_elements(By.XPATH, '//*[self::button or self::a or self::div or self::span or self::img or self::svg][text() or descendant::*[self::svg or self::img or contains(@class, "google")]]')
+        elements = driver.find_elements(By.XPATH, '//*[self::button or self::a or self::div or self::span or self::img or self::svg][text() or descendant::*[self::svg or self::img or contains(@class, "google") or contains(@title, "Google") or contains(@aria-label, "Google") or contains(@alt, "Google")]]')
         for element in elements:
-            # actions.move_to_element(element).perform()  # Hover to reveal hidden text
-            element_text = element.text.strip() if element.text.strip() else element.get_attribute('title') or "Google Icon/Button"
+            element_text = element.text.strip() if element.text.strip() else element.get_attribute('title') or element.get_attribute('aria-label') or element.get_attribute('alt') or "Google Icon/Button"
             
             element_embedding = model.encode([element_text], convert_to_tensor=True)
             similarities = util.pytorch_cos_sim(element_embedding, google_embeddings)
             max_similarity = similarities.max().item()
             
-            if max_similarity > 0.7:  # Adjust threshold as needed
+            if max_similarity > 0.85:  # Adjust threshold as needed
                 print(f"🔑 Found Google button: {element_text}")
                 print("🔑 Matched with Google phrase: ", google_button_texts[similarities.argmax().item()])
                 save_screenshot(driver, website, f"Google button {element_text} found")
@@ -171,7 +177,6 @@ def search_for_google_buttons(driver, website):
     
     print("❌ No Google buttons found.")
     return None
-
 
 def proceed_with_google_auth(driver, google_email, google_password, steps_reached, website):
     steps_reached += " -> Proceed with Google Auth"
@@ -226,28 +231,27 @@ def proceed_with_google_auth(driver, google_email, google_password, steps_reache
         steps_reached += " -> Failed at Google Auth"
         return steps_reached
 
-
 def enter_email_password(driver, email, password, username, steps_reached, website):
+    model = SentenceTransformer('all-MiniLM-L6-v2')
     context = {
-    "first_name": "John",
-    "last_name": "Doe",
-    "email": email,
-    "password": password,
-    "username": username,
-    "forurl": "https://example.com",
-    "agree_tnc": True,  # Terms & conditions
-    "subscribe_newsletter": False  # Optional
+        "first_name": "John",
+        "last_name": "Doe",
+        "email": email,
+        "password": password,
+        "username": username,
+        "forurl": "https://example.com",
+        "agree_tnc": True,  # Terms & conditions
+        "subscribe_newsletter": False  # Optional
     }
 
     name_labels = {
-    "first_name": ["first name", "given name", "name", "your first name", "fname"],
-    "last_name": ["last name", "surname", "family name", "your last name", "lname"],
-    "forurl": ["website", "url", "your site", "homepage", "portfolio", "company website"],
-    "agree_tnc": ["agree", "terms", "terms and conditions", "i agree", "accept terms"],
-    "subscribe_newsletter": ["subscribe", "newsletter", "sign up for updates", "email updates"]
+        "first_name": ["first name", "given name", "name", "your first name", "fname"],
+        "last_name": ["last name", "surname", "family name", "your last name", "lname"],
+        "forurl": ["website", "url", "your site", "homepage", "portfolio", "company website"],
+        "agree_tnc": ["agree", "terms", "terms and conditions", "i agree", "accept terms"],
+        "subscribe_newsletter": ["subscribe", "newsletter", "sign up for updates", "email updates"]
     }
 
-    model = SentenceTransformer('all-MiniLM-L6-v2')
     steps_reached += " -> Start Email/Password Entry"
     current_url = driver.current_url
     print(f"Current URL: {current_url}")
@@ -404,7 +408,7 @@ def register_with_google(driver, google_email, google_password, steps_reached, w
         steps_reached += " -> Failed at Registration"
         return steps_reached, keyword_found
 
-def register_website(driver, website, email, password, username, user_login, latest_automation_tracker_df):
+def register_website(driver, website, email, password, username, user_login, new_latest_automation_tracker_df):
     steps_reached = "Start"  # Initialize steps_reached
     keyword_found = ""  # Initialize keyword_found
     try:
@@ -422,7 +426,7 @@ def register_website(driver, website, email, password, username, user_login, lat
             print(f"✅ Successfully registered on {website}")
             form_fields = extract_form_fields(driver, website)
             update_automation_status(
-                latest_automation_tracker_df,
+                new_latest_automation_tracker_df,
                 user_login,
                 website,
                 1,
@@ -438,7 +442,7 @@ def register_website(driver, website, email, password, username, user_login, lat
                 print(f"✅ Successfully registered on {website}")
                 form_fields = extract_form_fields(driver, website)
                 update_automation_status(
-                    latest_automation_tracker_df,
+                    new_latest_automation_tracker_df,
                     user_login,
                     website,
                     1,
@@ -450,21 +454,22 @@ def register_website(driver, website, email, password, username, user_login, lat
             else:
                 # If both methods fail, log the failure
                 update_automation_status(
-                    latest_automation_tracker_df,
+                    new_latest_automation_tracker_df,
                     user_login,
                     website,
-                    0,
+                    1,
                     steps_reached=steps_reached,
-                    error_message="Both email/password and Google registration failed: " + error_message,
+                    form_fields=", ".join(form_fields),
                     keyword_found=keyword_found
                 )
+            
                 return False
 
     except Exception as e:
         error_msg = str(e)
         print(f"❌ ERROR: Failed to register on {website}: {error_msg}")
         update_automation_status(
-            latest_automation_tracker_df,
+            new_latest_automation_tracker_df,
             user_login,
             website,
             0,
@@ -495,7 +500,7 @@ def process_link(url):
 
 def main():
     current_user = "ShubhamGupta24"
-    latest_automation_tracker_df = create_or_load_automation_data()
+    new_latest_automation_tracker_df = create_or_load_automation_data()
     
     secrets = dotenv_values(".env")
     print("Secrets:", secrets)
@@ -507,7 +512,7 @@ def main():
     
 
     # websites = fetch_websites_from_sheet(sheet_id)
-    df=pd.read_csv('Updated_deduplicated_output.csv')
+    df=pd.read_csv('new_rest_list.csv',delimiter=',')
     websites = df['Website'].tolist()
 
     if websites==[]:
@@ -553,11 +558,11 @@ def main():
                     password,
                     username,
                     current_user,
-                    latest_automation_tracker_df
+                    new_latest_automation_tracker_df
                 )
                 
                 print("\nAutomation Tracker Status:")
-                print(latest_automation_tracker_df.tail())
+                print(new_latest_automation_tracker_df.tail())
                 
             except Exception as e:
                 print(f"❌ ERROR processing {website}: {str(e)}")
@@ -573,9 +578,9 @@ def main():
         
         
         print("\nFinal Results:")
-        print(latest_automation_tracker_df.groupby('status').size())
+        print(new_latest_automation_tracker_df.groupby('status').size())
         
-        latest_automation_tracker_df.to_csv('latest_auto_results.csv', index=False)
+        new_latest_automation_tracker_df.to_csv('new_latest_auto_results.csv', index=False)
         print("\nProcess completed. Results saved to results.csv")
 
 if __name__ == "__main__":
