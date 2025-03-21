@@ -55,7 +55,7 @@ We welcome contributions to enhance the functionality of the WebAccountCreatorBo
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
 
 ## Contact
-For any questions or suggestions, feel free to open an issue or contact me at shubham.gupta@example.com.
+For any questions or suggestions, feel free to open an issue or contact me at guptashubhamofficial24@gmail.com.
 
 Connect with me on [![LinkedIn](https://img.shields.io/badge/LinkedIn-blue?style=flat&logo=linkedin)](https://www.linkedin.com/in/shubham-gupta-4930b522a)
 
